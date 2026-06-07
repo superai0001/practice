@@ -3,6 +3,8 @@
 // Env vars (all optional):
 //   PROXY_PORT       proxy listen port            (default 8788)
 //   UI_PORT          web UI listen port           (default 8789)
+//   BIND_ADDR        listen address for proxy+UI  (default 127.0.0.1; use
+//                    0.0.0.0 to expose, e.g. inside Docker)
 //   LOG_DIR          directory for JSONL logs     (default <module>/logs)
 //   REDACT_AUTH      "0" to keep raw auth headers (default redact)
 //   ANTHROPIC_UPSTREAM  override Anthropic upstream (default https://api.anthropic.com)
@@ -147,6 +149,7 @@ export function loadConfig(overrides = {}) {
   return {
     proxyPort: intEnv('PROXY_PORT', 8788),
     uiPort: intEnv('UI_PORT', 8789),
+    bindAddr: process.env.BIND_ADDR || '127.0.0.1',
     logDir: process.env.LOG_DIR || path.resolve(__dirname, '..', 'logs'),
     redactAuth: process.env.REDACT_AUTH !== '0',
     maxBodyBytes: intEnv('MAX_BODY_BYTES', 2_000_000),

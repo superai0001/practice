@@ -1,0 +1,27 @@
+services:
+  cli-proxy-logger:
+    build: .
+    image: cli-proxy-logger-java
+    container_name: cli-proxy-logger-java
+    restart: unless-stopped
+    ports:
+      - "8788:8788"   # proxy + web UI share this port
+    environment:
+      # --- optional: route upstream through a proxy or advanced-protocol kernel ---
+      # UPSTREAM_PROXY: "socks5://host.docker.internal:1080"
+      # UPSTREAM_PROXY: "ss://<base64(method:password)>@example.com:8388#node"
+      # PROXY_KERNEL: "auto"              # auto | xray | sing-box
+      # XRAY_BIN: "/vendor/xray"          # LINUX binaries (see ./vendor note below)
+      # SING_BOX_BIN: "/vendor/sing-box"
+    volumes:
+      - ./logs:/app/logs
+      # Kernel binaries must be LINUX builds (the container is Linux). Put
+      # `xray` / `sing-box` in ./vendor on the host, then uncomment:
+      # - ./vendor:/vendor:ro
+
+# Build Linux kernel binaries into ./vendor without installing Go locally:
+#   docker run --rm -v "$PWD/vendor:/out" golang:1.26 sh -c \
+#     "git clone https://github.com/XTLS/Xray-core /x && cd /x && go build -o /out/xray ./main"
+#   docker run --rm -v "$PWD/vendor:/out" golang:1.24 sh -c \
+#     "git clone https://github.com/SagerNet/sing-box /s && cd /s && \
+#      go build -tags 'with_utls,with_quic' -o /out/sing-box ./cmd/sing-box"

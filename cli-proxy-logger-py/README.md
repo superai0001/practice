@@ -443,10 +443,45 @@ claude
    - **Windows（nssm）**：用 <code>deploy/install-nssm.ps1</code>——装好 [nssm](https://nssm.cc/) 后以管理员 PowerShell 运行即可注册成开机自启服务（卸载：`nssm remove cli-proxy-logger-py confirm`）。
    - 临时跑也行：Linux `nohup python -m cli_proxy_logger > proxy.out 2>&1 &`；Windows `start /b python -m cli_proxy_logger`。
 
-**可选（进阶）：单文件可执行**
-用 PyInstaller（`pyinstaller -F -n cli-proxy-logger cli_proxy_logger/__main__.py`，记得用 `--add-data` 带上 `public/`）在**与内网相同 OS 的联网机器**上打成单 exe 再拷过去，免在内网装 Python。本仓库未内置打包脚本，按需自行打包。
+### Docker / docker-compose 部署
 
-> **网络/安全**：代理与 UI 默认监听本机端口（proxy `:8788`、UI `:8789`）。CLI 的 base URL 指向 `127.0.0.1`，**代理需与 CLI 部署在同一台机器**；不要把端口暴露到内网其他机器。
+仓库内置 `Dockerfile` + `docker-compose.yml`（纯标准库，基于 `python:3.12-slim`）。容器内用 `BIND_ADDR=0.0.0.0` 监听以便发布端口可达。
+
+```bash
+cd cli-proxy-logger-py
+docker compose up -d --build
+# 代理: http://<host>:8788   UI: http://<host>:8789   日志落在 ./logs
+docker compose logs -f
+docker compose down
+```
+
+或不用 compose：
+
+```bash
+docker build -t cli-proxy-logger-py .
+docker run -d --name cli-proxy-logger-py -p 8788:8788 -p 8789:8789 \
+  -e BIND_ADDR=0.0.0.0 -v "$PWD/logs:/app/logs" cli-proxy-logger-py
+```
+
+**容器里走内核（高级协议）**：内核二进制必须是 **Linux 版**。把 Linux 版 `xray`/`sing-box` 放进 `./vendor`，在 compose 里取消注释 `./vendor:/vendor:ro` 卷与 `XRAY_BIN`/`SING_BOX_BIN`/`PROXY_KERNEL` 即可（不装 Go 的交叉构建命令见 compose 文件末尾注释）。
+
+### 单文件 exe（PyInstaller，已实测）
+
+本变体是纯标准库，PyInstaller 能干净地打成一个**免装 Python 的单文件 exe**。在**与目标机相同 OS** 的联网机器上：
+
+```bash
+pip install pyinstaller
+# 入口脚本（PyInstaller 需要一个脚本而非 -m）：
+printf 'from cli_proxy_logger.__main__ import main\nif __name__=="__main__":\n    main()\n' > pyi_entry.py
+# Windows 用 ';' 作 --add-data 分隔符；Linux/macOS 用 ':'
+pyinstaller --onefile --name cli-proxy-logger \
+  --add-data "public;public" --collect-submodules cli_proxy_logger pyi_entry.py
+# → dist/cli-proxy-logger.exe（已把 public/ 一并打入，UI 可用）
+```
+
+产出的 `dist/cli-proxy-logger.exe` 直接双击/命令行运行即可（约 8–9 MB）。环境变量照常生效，例如 `set BIND_ADDR=0.0.0.0 && dist\cli-proxy-logger.exe`。
+
+> **网络/安全**：代理与 UI 默认监听本机端口（proxy `:8788`、UI `:8789`），需要对外时设 `BIND_ADDR=0.0.0.0`（Docker 已默认）。CLI 的 base URL 通常指向 `127.0.0.1`，**代理一般与 CLI 部署在同一台机器**；把端口暴露到内网其他机器时请自行加访问控制。
 
 ## 工作原理（三种 wire 格式的工具调用解析点）
 

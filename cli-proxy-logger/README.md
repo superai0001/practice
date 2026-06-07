@@ -430,10 +430,40 @@ claude
    - **Windows（nssm）**：用 <code>deploy/install-nssm.ps1</code>——装好 [nssm](https://nssm.cc/) 后，以管理员 PowerShell 运行该脚本即可注册成开机自启服务（卸载：`nssm remove cli-proxy-logger confirm`）。
    - 临时跑也行：Linux `nohup node src/index.js > proxy.out 2>&1 &`；Windows `start /b node src/index.js`。
 
-**可选（进阶）：单文件可执行**
-Node 20 支持 SEA（Single Executable Applications）把脚本+运行时打成一个 exe，免在内网装 Node；或用 `pkg`/`nexe`。这条本仓库未内置脚本，按需自行打包。
+### Docker / docker-compose 部署
 
-> **网络/安全**：代理与 UI 默认监听本机端口（proxy `:8788`、UI `:8789`）。由于 CLI 的 base URL 指向 `127.0.0.1`，**代理需与 CLI 部署在同一台机器**。不要把这两个端口暴露到内网其他机器（鉴权头虽落盘脱敏，但内存/转发链路上是明文）。
+仓库内置 `Dockerfile` + `docker-compose.yml`（零三方依赖，基于 `node:20-slim`）。容器内用 `BIND_ADDR=0.0.0.0` 监听以便发布端口可达。
+
+```bash
+cd cli-proxy-logger
+docker compose up -d --build
+# 代理: http://<host>:8788   UI: http://<host>:8789   日志落在 ./logs
+docker compose logs -f
+docker compose down
+```
+
+或不用 compose：
+
+```bash
+docker build -t cli-proxy-logger-node .
+docker run -d --name cli-proxy-logger -p 8788:8788 -p 8789:8789 \
+  -e BIND_ADDR=0.0.0.0 -v "$PWD/logs:/app/logs" cli-proxy-logger-node
+```
+
+**容器里走内核（高级协议）**：内核二进制必须是 **Linux 版**（容器是 Linux）。把 Linux 版 `xray`/`sing-box` 放进 `./vendor`，在 compose 里取消注释 `./vendor:/vendor:ro` 卷与 `XRAY_BIN`/`SING_BOX_BIN`/`PROXY_KERNEL` 即可。不装 Go 也能用一次性 Go 容器交叉构建（命令见 compose 文件末尾注释）。
+
+> 注意：CLI 的 base URL 仍指向 CLI 所在机器；若代理跑在另一台机器，把 base URL 指向该机的 `8788`，并自行确保链路安全（见下方网络/安全说明）。
+
+**关于单文件 exe（Node 变体的实话）**
+本变体源码是 **ESM + 顶层 await + `import.meta`**，因此 Node 内置的 SEA（要求把入口打成单个 CommonJS 文件）和 `esbuild --format=cjs` 都**不能直接用**（顶层 await 无法编进 CJS）。要硬做需要先改造成无顶层 await 的 CJS 再打包，得不偿失。
+
+因此 Node 变体的发布建议优先：
+- **Docker 镜像**（见上，最省心、跨平台）；或
+- **目录压缩包**：`scripts/package.ps1` 产出 `dist/cli-proxy-logger-node.zip`，目标机只需装 Node 20 解压即跑（无 `node_modules` 可装）。
+
+如果你确实要一个**免装运行时的单文件 .exe**，最干净的是用 **Python 变体的 PyInstaller** 路径（见 `cli-proxy-logger-py` 的 README，一条命令产出 `dist/cli-proxy-logger.exe`，已实测可跑）。三个变体功能等价，按交付形态选即可。
+
+> **网络/安全**：代理与 UI 默认监听本机端口（proxy `:8788`、UI `:8789`），需要对外时设 `BIND_ADDR=0.0.0.0`（Docker 已默认）。由于 CLI 的 base URL 通常指向 `127.0.0.1`，**代理一般与 CLI 部署在同一台机器**。把端口暴露到内网其他机器时请自行加访问控制（鉴权头虽落盘脱敏，但内存/转发链路上是明文）。
 
 ## 工作原理（三种 wire 格式的工具调用解析点）
 

@@ -94,8 +94,9 @@ export function startUi(config, recorder) {
     });
   });
 
-  server.listen(config.uiPort, '127.0.0.1', () => {
-    console.log(`[ui]    open http://127.0.0.1:${server.address().port}`);
+  const bindAddr = config.bindAddr || '127.0.0.1';
+  server.listen(config.uiPort, bindAddr, () => {
+    console.log(`[ui]    open http://${bindAddr}:${server.address().port}`);
   });
   return server;
 }

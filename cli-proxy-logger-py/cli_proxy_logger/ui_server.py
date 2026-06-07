@@ -122,11 +122,12 @@ def _make_handler(config, recorder):
 
 def start_ui(config, recorder):
     handler = _make_handler(config, recorder)
-    server = ThreadingHTTPServer(("127.0.0.1", config["uiPort"]), handler)
+    bind_addr = config.get("bindAddr") or "127.0.0.1"
+    server = ThreadingHTTPServer((bind_addr, config["uiPort"]), handler)
     server.daemon_threads = True
     actual_port = server.server_address[1]
     config["uiPort"] = actual_port
-    print(f"[ui]    open http://127.0.0.1:{actual_port}")
+    print(f"[ui]    open http://{bind_addr}:{actual_port}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server

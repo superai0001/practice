@@ -1046,12 +1046,13 @@ def _make_handler(config, recorder):
 
 def start_proxy(config, recorder):
     handler = _make_handler(config, recorder)
-    server = ThreadingHTTPServer(("127.0.0.1", config["proxyPort"]), handler)
+    bind_addr = config.get("bindAddr") or "127.0.0.1"
+    server = ThreadingHTTPServer((bind_addr, config["proxyPort"]), handler)
     server.daemon_threads = True
     server.breakers = handler.breakers
     actual_port = server.server_address[1]
     config["proxyPort"] = actual_port
-    print(f"[proxy] listening on http://127.0.0.1:{actual_port}")
+    print(f"[proxy] listening on http://{bind_addr}:{actual_port}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server

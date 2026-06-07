@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+logs
+logs-*
+.tmp-logs*
+.venv
+vendor
+*.log
+.git
+tests
+Dockerfile
+docker-compose.yml

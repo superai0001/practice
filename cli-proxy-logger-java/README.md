@@ -454,7 +454,45 @@ Java 版与 Node/Python 不同：它**有第三方依赖**（Spring Boot、内�
 
 **如果必须在内网用 Maven 构建**（不推荐，麻烦）：在联网机器用 `mvn -DskipTests package dependency:go-offline` 预热本地仓库 `~/.m2/repository`，把整个 `.m2/repository` 拷到内网同路径，再用 `mvn -o package` 离线构建。直接拷 fat jar 更省事。
 
-> **网络/安全**：代理 + UI 共用一个端口（默认 `:8788`）。CLI 的 base URL 指向 `127.0.0.1`，**建议与 CLI 同机部署**。Spring Boot/Tomcat 默认会监听所有网卡，若只想本机可访问，加 `--server.address=127.0.0.1`，避免端口暴露到内网其他机器。
+### Docker / docker-compose 部署
+
+仓库内置多阶段 `Dockerfile`（`maven:3.9-eclipse-temurin-8` 构建 fat jar → `eclipse-temurin:8-jre` 运行）+ `docker-compose.yml`。Spring Boot 默认监听所有网卡，发布端口即可达，无需额外 `BIND_ADDR`。
+
+```bash
+cd cli-proxy-logger-java
+docker compose up -d --build
+# 代理 + UI: http://<host>:8788   日志落在 ./logs
+docker compose logs -f
+docker compose down
+```
+
+或不用 compose：
+
+```bash
+docker build -t cli-proxy-logger-java .
+docker run -d --name cli-proxy-logger-java -p 8788:8788 \
+  -v "$PWD/logs:/app/logs" cli-proxy-logger-java
+```
+
+**容器里走内核（高级协议）**：内核二进制必须是 **Linux 版**。把 Linux 版 `xray`/`sing-box` 放进 `./vendor`，在 compose 里取消注释 `./vendor:/vendor:ro` 卷与 `XRAY_BIN`/`SING_BOX_BIN`/`PROXY_KERNEL` 即可（不装 Go 的交叉构建命令见 compose 文件末尾注释）。
+
+### 关于 .exe / 单文件分发
+
+Java 的标准交付物就是上面那个**可执行 fat jar**（`java -jar cli-proxy-logger-1.0.0.jar`，已实测在 JDK 8 上启动并服务 `:8788`），目标机只需一个 JRE。
+
+如果一定要**免装 JRE 的原生 .exe/安装包**，用 JDK 自带的 `jpackage`（**需 JDK 14+，本机是 JDK 8 无此工具，未实测**）：
+
+```bash
+# 在装了 JDK 17+ 的机器上：
+jpackage --type app-image --name cli-proxy-logger \
+  --input target --main-jar cli-proxy-logger-1.0.0.jar \
+  --main-class org.springframework.boot.loader.JarLauncher
+# Windows 下 --type exe / msi 可出安装包（需 WiX）
+```
+
+多数场景直接用 **Docker 镜像**或 **fat jar + JRE** 即可，无需 jpackage。
+
+> **网络/安全**：代理 + UI 共用一个端口（默认 `:8788`）。CLI 的 base URL 指向 `127.0.0.1`，**建议与 CLI 同机部署**。Spring Boot/Tomcat 默认会监听所有网卡（Docker 下正需如此），若只想本机可访问，加 `--server.address=127.0.0.1`，避免端口暴露到内网其他机器。
 
 ## 代码结构（控制/数据流顺序）
 
