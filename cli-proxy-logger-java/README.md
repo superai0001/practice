@@ -133,6 +133,7 @@ PROXY_OPENAI_UPSTREAM=https://api.freemodel.dev PROXY_ANTHROPIC_UPSTREAM=https:/
 | 配置项 | 默认 | 说明 |
 |--------|------|------|
 | `server.port` | `8788` | 代理 + UI 端口 |
+| `server.address` | 全部网卡 | 监听地址。Spring Boot 默认监听所有网卡（Docker 下正需如此）；只想本机可访问设 `127.0.0.1` |
 | `proxy.anthropic-upstream` | `https://api.anthropic.com` | Anthropic 上游 |
 | `proxy.openai-upstream` | `https://api.openai.com` | OpenAI 上游 |
 | `proxy.log-dir` | `./logs` | JSONL 日志目录 |

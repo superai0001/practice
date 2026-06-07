@@ -145,6 +145,7 @@ OPENAI_UPSTREAM=https://api.freemodel.dev ANTHROPIC_UPSTREAM=https://cc.freemode
 |------|------|------|
 | `PROXY_PORT` | `8788` | 代理监听端口 |
 | `UI_PORT` | `8789` | Web UI 端口 |
+| `BIND_ADDR` | `127.0.0.1` | 代理 + UI 的监听地址。需对外/容器内访问设 `0.0.0.0`（Docker 镜像已默认 `0.0.0.0`） |
 | `LOG_DIR` | `./logs` | JSONL 日志目录 |
 | `REDACT_AUTH` | 开启 | 落盘时对 `x-api-key`/`authorization` 脱敏；设 `0` 关闭 |
 | `ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Anthropic 上游 |
