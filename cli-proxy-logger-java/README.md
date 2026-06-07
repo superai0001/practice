@@ -423,6 +423,8 @@ claude
 
 ## 内网打包与部署（离线）
 
+> 完整的部署手册（配置速查 + 本机/离线/systemd/nssm/Docker/exe 各环境步骤 + 内核构建）见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
 Java 版与 Node/Python 不同：它**有第三方依赖**（Spring Boot、内嵌 Tomcat、Jackson），内网机器无法从 Maven 中央仓库下载。所以**核心思路是：在能联网的机器上打成 fat jar（所有依赖打进单个 jar），再把 jar 拷到内网用 JRE 直接跑**。
 
 **步骤**

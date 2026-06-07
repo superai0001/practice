@@ -418,6 +418,8 @@ claude
 
 ## 内网打包与部署（离线）
 
+> 完整的部署手册（配置速查 + 本机/离线/systemd/nssm/Docker/exe 各环境步骤 + 内核构建）见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
 本版本**纯 Python 标准库、零第三方依赖**（不需要 `pip install`），内网部署只需：拷目录 + 装好 Python 运行时。
 
 **步骤（推荐：拷目录 + 内网 Python 运行时）**

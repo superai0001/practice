@@ -409,6 +409,8 @@ claude
 
 ## 内网打包与部署（离线）
 
+> 完整的部署手册（配置速查 + 本机/离线/systemd/nssm/Docker/exe 各环境步骤 + 内核构建）见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
 本工具**零第三方依赖**（只用 Node 内置模块），所以内网部署很简单：把目录拷进去 + 装好 Node 运行时即可，**不需要 `npm install`、不需要联网**。
 
 **步骤（推荐：拷目录 + 离线 Node 运行时）**
