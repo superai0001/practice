@@ -33,7 +33,8 @@ function streamSettings(spec) {
   }
   if (tr) {
     if (network === 'ws') {
-      ss.wsSettings = { path: tr.path || '/', headers: tr.host ? { Host: tr.host } : {} };
+      // xray prefers an independent `host` field over a Host header.
+      ss.wsSettings = { path: tr.path || '/', ...(tr.host ? { host: tr.host } : {}) };
     } else if (network === 'grpc') {
       ss.grpcSettings = { serviceName: tr.serviceName || '' };
     } else if (network === 'http') {
