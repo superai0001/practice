@@ -193,10 +193,19 @@ export function loadConfig(overrides = {}) {
     // Request filters/rules (opt-in): mutate outbound headers/body before send.
     filters: loadFilters(),
     // Outbound proxy (opt-in): route upstream connections via an HTTP/SOCKS5
-    // proxy. null when UPSTREAM_PROXY (or HTTPS_PROXY/HTTP_PROXY) is unset.
+    // proxy, OR — for advanced share links (vmess/vless/trojan/ss/hysteria2/
+    // tuic) or a native PROXY_KERNEL_CONFIG — via a local xray/sing-box kernel.
+    // null when nothing is configured.
     outbound: createOutbound(
       process.env.UPSTREAM_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy
       || process.env.HTTP_PROXY || process.env.http_proxy,
+      {
+        kernel: process.env.PROXY_KERNEL || 'auto',
+        configPath: process.env.PROXY_KERNEL_CONFIG || '',
+        xrayBin: process.env.XRAY_BIN || '',
+        singboxBin: process.env.SING_BOX_BIN || '',
+        socksPort: intEnv('PROXY_KERNEL_SOCKS_PORT', 0),
+      },
     ),
     ...overrides,
   };

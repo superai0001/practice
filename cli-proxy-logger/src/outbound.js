@@ -16,6 +16,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
+import { createKernel, isKernelScheme } from './kernel/index.js';
 
 // Parse a proxy URL into a normalized descriptor, or null when nothing/invalid.
 // Supported protocols: http, https, socks/socks5/socks5h (all SOCKS5).
@@ -158,17 +159,25 @@ function rawConnect(proxy, host, port, cb) {
   else httpConnect(proxy, host, port, cb);
 }
 
-// Build the agents bound to a given proxy. Returns null when no proxy.
-export function createOutbound(raw) {
-  const proxy = parseProxyUrl(raw);
-  if (!proxy) return null;
+// Build the http/https tunnel agents for a (possibly deferred) proxy descriptor.
+//   getProxy()  -> the current proxy descriptor (null until ready)
+//   whenReady   -> resolves once getProxy() returns a usable descriptor
+function buildAgents(getProxy, whenReady) {
+  // Resolve readiness then perform the tunnel connect.
+  function connectVia(host, port, cb) {
+    whenReady.then(() => {
+      const proxy = getProxy();
+      if (!proxy) { cb(new Error('outbound proxy unavailable')); return; }
+      rawConnect(proxy, host, port, cb);
+    }, cb);
+  }
 
   // http upstream: hand back the tunneled raw socket as-is.
   class HttpTunnelAgent extends http.Agent {
     createConnection(options, callback) {
       const host = options.host || options.hostname;
       const port = Number(options.port) || 80;
-      rawConnect(proxy, host, port, callback);
+      connectVia(host, port, callback);
     }
   }
   // https upstream: wrap the tunneled socket in TLS for the target host.
@@ -176,7 +185,7 @@ export function createOutbound(raw) {
     createConnection(options, callback) {
       const host = options.host || options.hostname;
       const port = Number(options.port) || 443;
-      rawConnect(proxy, host, port, (err, socket) => {
+      connectVia(host, port, (err, socket) => {
         if (err) {
           callback(err);
           return;
@@ -197,14 +206,58 @@ export function createOutbound(raw) {
 
   const httpAgent = new HttpTunnelAgent({ keepAlive: false });
   const httpsAgent = new HttpsTunnelAgent({ keepAlive: false });
+  return (upstreamUrl) => {
+    const isHttps = String(upstreamUrl.protocol || upstreamUrl).includes('https');
+    return isHttps ? httpsAgent : httpAgent;
+  };
+}
+
+// Build the outbound proxy. Returns null when nothing is configured.
+//
+//   raw         a proxy/share URL: http/https/socks5 (direct, no kernel) OR an
+//               advanced share link (vmess/vless/trojan/ss/hysteria2/tuic)
+//               which is routed through a local xray/sing-box kernel.
+//   kernelOpts  { kernel, configPath, xrayBin, singboxBin, socksPort } — when
+//               configPath is set, the kernel is used regardless of `raw`.
+export function createOutbound(raw, kernelOpts = {}) {
+  const useKernel = isKernelScheme(raw) || !!(kernelOpts && kernelOpts.configPath);
+
+  // --- direct path (today's behavior, unchanged) ---------------------------
+  if (!useKernel) {
+    const proxy = parseProxyUrl(raw);
+    if (!proxy) return null;
+    return {
+      proxy,
+      kernel: null,
+      whenReady: Promise.resolve(),
+      describe: `${proxy.kind}://${proxy.hostname}:${proxy.port}${proxy.username ? ' (auth)' : ''}`,
+      agentFor: buildAgents(() => proxy, Promise.resolve()),
+      stop() {},
+    };
+  }
+
+  // --- kernel path (advanced protocols via xray/sing-box) ------------------
+  const kernel = createKernel({
+    link: isKernelScheme(raw) ? raw : undefined,
+    configPath: kernelOpts.configPath,
+    kernel: kernelOpts.kernel,
+    xrayBin: kernelOpts.xrayBin,
+    singboxBin: kernelOpts.singboxBin,
+    socksPort: kernelOpts.socksPort,
+  });
+  let proxy = null; // socks5 -> local kernel inbound, set once ready
+  const whenReady = kernel.start().then(({ socksPort }) => {
+    proxy = { kind: 'socks5', hostname: '127.0.0.1', port: socksPort, username: '', password: '' };
+  });
+  // Surface a clear error rather than an unhandled rejection if the kernel dies.
+  whenReady.catch((err) => console.error(`[kernel] startup failed: ${err.message}`));
 
   return {
-    proxy,
-    describe: `${proxy.kind}://${proxy.hostname}:${proxy.port}${proxy.username ? ' (auth)' : ''}`,
-    // Pick the right agent for an upstream URL (string or URL).
-    agentFor(upstreamUrl) {
-      const isHttps = String(upstreamUrl.protocol || upstreamUrl).includes('https');
-      return isHttps ? httpsAgent : httpAgent;
-    },
+    get proxy() { return proxy; },
+    kernel,
+    whenReady,
+    describe: `kernel ${kernel.describe()}`,
+    agentFor: buildAgents(() => proxy, whenReady),
+    stop() { kernel.stop(); },
   };
 }
