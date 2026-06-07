@@ -136,6 +136,7 @@ OPENAI_UPSTREAM=https://api.freemodel.dev ANTHROPIC_UPSTREAM=https://cc.freemode
 |------|------|------|
 | `PROXY_PORT` | `8788` | 代理监听端口 |
 | `UI_PORT` | `8789` | Web UI 端口 |
+| `BIND_ADDR` | `127.0.0.1` | 代理 + UI 的监听地址。需对外/容器内访问设 `0.0.0.0`（Docker 镜像已默认 `0.0.0.0`） |
 | `LOG_DIR` | `./logs` | JSONL 日志目录 |
 | `REDACT_AUTH` | 开启 | 落盘时对 `x-api-key`/`authorization` 脱敏；设 `0` 关闭 |
 | `ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Anthropic 上游 |
@@ -162,7 +163,11 @@ OPENAI_UPSTREAM=https://api.freemodel.dev ANTHROPIC_UPSTREAM=https://cc.freemode
 | `TOOL_NAME_MAP_FILE` | 空 | 工具名映射 JSON 文件路径（优先于 `TOOL_NAME_MAP`） |
 | `FILTERS` | 空 | 请求过滤器/规则 JSON 数组（见下节）；转发上游前改写请求头/请求体 |
 | `FILTERS_FILE` | 空 | 过滤器 JSON 文件路径（优先于 `FILTERS`） |
-| `UPSTREAM_PROXY` | 空 | 出站代理 URL（`http://`/`https://`/`socks5://`，可带 `user:pass@`）；未设时回退 `HTTPS_PROXY`/`HTTP_PROXY` |
+| `UPSTREAM_PROXY` | 空 | 出站代理 URL。普通代理：`http://`/`https://`/`socks5://`（可带 `user:pass@`），未设时回退 `HTTPS_PROXY`/`HTTP_PROXY`。**高级协议**：`vmess://`/`vless://`/`trojan://`/`ss://`/`hysteria2://`(`hy2://`)/`tuic://` 分享链接，自动经本地 xray/sing-box 内核出站（见「内核出站」节） |
+| `PROXY_KERNEL` | `auto` | 内核选择：`auto`/`xray`/`sing-box`。`auto` 优先 xray；`hysteria2`/`tuic` 只能 sing-box，会自动选 |
+| `PROXY_KERNEL_CONFIG` | 空 | 一份完整的原生内核配置 JSON 文件路径（高级用法）；会自动确保存在一个回环 socks inbound 并路由过去。设了它就启用内核（不需要 `UPSTREAM_PROXY`） |
+| `XRAY_BIN` / `SING_BOX_BIN` | 空 | 内核二进制路径；不设则按 PATH 与同级 `vendor/` 目录查找 |
+| `PROXY_KERNEL_SOCKS_PORT` | 随机 | 内核本地 socks inbound 端口（默认取空闲端口） |
 
 ## 弹性：多供应商故障转移 + 熔断 + thinking 整流（全部 opt-in）
 
@@ -304,6 +309,70 @@ UPSTREAM_PROXY=socks5://127.0.0.1:1080 npm start
 UPSTREAM_PROXY=http://user:pass@proxy.example.com:3128 npm start
 ```
 
+#### 内核出站：用 xray-core / sing-box 支持更多协议
+
+`http`/`socks5` 之外，出站代理还能走 **VMess / VLESS / Trojan / Shadowsocks / Hysteria2 / TUIC** 等协议——做法是把官方内核（[xray-core](https://github.com/XTLS/Xray-core) 或 [sing-box](https://github.com/SagerNet/sing-box)）作为本地子进程拉起：内核 inbound 是一个**仅回环的 SOCKS5**，outbound 是你的高级协议；代理现有的 socks 隧道直接指向这个本地端口。Node 侧零依赖、隧道逻辑零改动。
+
+```
+CLI ──HTTP──▶ cli-proxy-logger :8788 ──socks5──▶ 127.0.0.1:<随机端口>
+                                                  (xray / sing-box)
+                                                       │ VMess/VLESS/Trojan/SS/Hy2/TUIC
+                                                       ▼  真实上游
+```
+
+**前置条件**：本机要有内核二进制。**最省事：一键下载官方预编译二进制**（无需装 Go）：
+
+```bash
+bash scripts/fetch-kernel.sh                                       # Linux/macOS
+powershell -ExecutionPolicy Bypass -File scripts\fetch-kernel.ps1  # Windows
+# 拉官方 Releases 的 xray + sing-box 到 ./vendor/（应用自动发现）；只要一个：fetch-kernel.sh xray
+```
+
+也可手动到 [xray](https://github.com/XTLS/Xray-core/releases) / [sing-box](https://github.com/SagerNet/sing-box/releases) Releases 下载，或从源码自行构建（仅在需要特定版本/特性时，需 Go）：
+
+```bash
+# xray-core -> 产出 ./xray（用较新的 Go，本项目用 Go 1.26 验证过）
+git clone https://github.com/XTLS/Xray-core && (cd Xray-core && go build -o xray ./main)
+
+# sing-box -> 产出 ./sing-box
+# 注意：sing-box 的 badtls 用 //go:linkname 引用 crypto/tls 内部方法，
+#      Go 1.26 改了相关签名导致链接失败；请用 Go 1.24.x 构建，并带上需要的特性 tag。
+git clone https://github.com/SagerNet/sing-box && \
+  (cd sing-box && go build -tags "with_utls,with_quic" ./cmd/sing-box)
+```
+
+> Windows 下产出 `xray.exe` / `sing-box.exe`。`with_quic` 是 Hysteria2/TUIC 必需的；`with_utls` 提供 uTLS 指纹（`fp=chrome` 等）。
+
+把二进制放进 PATH、或放到本模块同级的 `vendor/` 目录、或用 `XRAY_BIN` / `SING_BOX_BIN` 指定路径（推荐绝对路径）：
+
+```bash
+export XRAY_BIN=/abs/path/to/xray            # Windows: set XRAY_BIN=C:\path\xray.exe
+export SING_BOX_BIN=/abs/path/to/sing-box
+```
+
+二进制查找顺序：`XRAY_BIN`/`SING_BOX_BIN` 显式路径 → 同级 `vendor/`（`xray`/`sing-box`，Windows 加 `.exe`）→ 系统 PATH。
+
+**用法 A：直接给分享链接**（最省事）。`UPSTREAM_PROXY` 识别到高级协议链接就自动走内核：
+
+```bash
+# VLESS + Reality（自动选 xray）
+UPSTREAM_PROXY='vless://<uuid>@example.com:443?encryption=none&security=reality&pbk=<pubkey>&sid=<shortid>&sni=www.apple.com&fp=chrome&type=tcp#node' npm start
+# VMess（v2rayN 的 base64-JSON 链接）
+UPSTREAM_PROXY='vmess://eyJ2IjoiMiIsImFkZCI6...' npm start
+# Hysteria2 / TUIC（只能 sing-box，auto 会自动选）
+UPSTREAM_PROXY='hysteria2://<pass>@example.com:8443?sni=example.com#node' npm start
+```
+
+`PROXY_KERNEL=auto`（默认）优先用 xray；`hysteria2`/`tuic` xray 不支持，会自动改用 sing-box。也可显式 `PROXY_KERNEL=xray` 或 `PROXY_KERNEL=sing-box`。
+
+**用法 B：给一份完整原生配置**（高级，协议/参数随便配）。设 `PROXY_KERNEL_CONFIG` 指向 xray 或 sing-box 的原生 JSON；代理会自动确保里面有一个回环 socks inbound 再路由过去：
+
+```bash
+PROXY_KERNEL=sing-box PROXY_KERNEL_CONFIG=./my-singbox.json npm start
+```
+
+> 链接里的常用参数都支持：TLS（`security=tls`，`sni`/`alpn`/`fp`/`allowInsecure`）、Reality（`security=reality`，`pbk`/`sid`/`spx`）、传输层（`type=ws|grpc|http|httpupgrade`，`path`/`host`/`serviceName`）。内核子进程随主进程退出（SIGINT/SIGTERM）一并关闭，临时配置文件自动清理。
+
 > Web UI 顶部有「config」按钮，只读展示当前生效的工具名映射规模、过滤器列表、出站代理（脱敏）、翻译/弹性开关，便于核对配置是否按预期加载。
 
 ## 协议翻译：让只支持 `/v1/chat/completions` 的厂商也能跑 Claude Code
@@ -348,6 +417,8 @@ claude
 
 ## 内网打包与部署（离线）
 
+> 完整的部署手册（配置速查 + 本机/离线/systemd/nssm/Docker/exe 各环境步骤 + 内核构建）见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
 本工具**零第三方依赖**（只用 Node 内置模块），所以内网部署很简单：把目录拷进去 + 装好 Node 运行时即可，**不需要 `npm install`、不需要联网**。
 
 **步骤（推荐：拷目录 + 离线 Node 运行时）**
@@ -370,10 +441,40 @@ claude
    - **Windows（nssm）**：用 <code>deploy/install-nssm.ps1</code>——装好 [nssm](https://nssm.cc/) 后，以管理员 PowerShell 运行该脚本即可注册成开机自启服务（卸载：`nssm remove cli-proxy-logger confirm`）。
    - 临时跑也行：Linux `nohup node src/index.js > proxy.out 2>&1 &`；Windows `start /b node src/index.js`。
 
-**可选（进阶）：单文件可执行**
-Node 20 支持 SEA（Single Executable Applications）把脚本+运行时打成一个 exe，免在内网装 Node；或用 `pkg`/`nexe`。这条本仓库未内置脚本，按需自行打包。
+### Docker / docker-compose 部署
 
-> **网络/安全**：代理与 UI 默认监听本机端口（proxy `:8788`、UI `:8789`）。由于 CLI 的 base URL 指向 `127.0.0.1`，**代理需与 CLI 部署在同一台机器**。不要把这两个端口暴露到内网其他机器（鉴权头虽落盘脱敏，但内存/转发链路上是明文）。
+仓库内置 `Dockerfile` + `docker-compose.yml`（零三方依赖，基于 `node:20-slim`）。容器内用 `BIND_ADDR=0.0.0.0` 监听以便发布端口可达。
+
+```bash
+cd cli-proxy-logger
+docker compose up -d --build
+# 代理: http://<host>:8788   UI: http://<host>:8789   日志落在 ./logs
+docker compose logs -f
+docker compose down
+```
+
+或不用 compose：
+
+```bash
+docker build -t cli-proxy-logger-node .
+docker run -d --name cli-proxy-logger -p 8788:8788 -p 8789:8789 \
+  -e BIND_ADDR=0.0.0.0 -v "$PWD/logs:/app/logs" cli-proxy-logger-node
+```
+
+**容器里走内核（高级协议）**：内核二进制必须是 **Linux 版**（容器是 Linux）。把 Linux 版 `xray`/`sing-box` 放进 `./vendor`，在 compose 里取消注释 `./vendor:/vendor:ro` 卷与 `XRAY_BIN`/`SING_BOX_BIN`/`PROXY_KERNEL` 即可。不装 Go 也能用一次性 Go 容器交叉构建（命令见 compose 文件末尾注释）。
+
+> 注意：CLI 的 base URL 仍指向 CLI 所在机器；若代理跑在另一台机器，把 base URL 指向该机的 `8788`，并自行确保链路安全（见下方网络/安全说明）。
+
+**关于单文件 exe（Node 变体的实话）**
+本变体源码是 **ESM + 顶层 await + `import.meta`**，因此 Node 内置的 SEA（要求把入口打成单个 CommonJS 文件）和 `esbuild --format=cjs` 都**不能直接用**（顶层 await 无法编进 CJS）。要硬做需要先改造成无顶层 await 的 CJS 再打包，得不偿失。
+
+因此 Node 变体的发布建议优先：
+- **Docker 镜像**（见上，最省心、跨平台）；或
+- **目录压缩包**：`scripts/package.ps1` 产出 `dist/cli-proxy-logger-node.zip`，目标机只需装 Node 20 解压即跑（无 `node_modules` 可装）。
+
+如果你确实要一个**免装运行时的单文件 .exe**，最干净的是用 **Python 变体的 PyInstaller** 路径（见 `cli-proxy-logger-py` 的 README，一条命令产出 `dist/cli-proxy-logger.exe`，已实测可跑）。三个变体功能等价，按交付形态选即可。
+
+> **网络/安全**：代理与 UI 默认监听本机端口（proxy `:8788`、UI `:8789`），需要对外时设 `BIND_ADDR=0.0.0.0`（Docker 已默认）。由于 CLI 的 base URL 通常指向 `127.0.0.1`，**代理一般与 CLI 部署在同一台机器**。把端口暴露到内网其他机器时请自行加访问控制（鉴权头虽落盘脱敏，但内存/转发链路上是明文）。
 
 ## 工作原理（三种 wire 格式的工具调用解析点）
 

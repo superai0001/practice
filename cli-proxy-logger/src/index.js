@@ -8,6 +8,23 @@ import { startUi } from './ui-server.js';
 
 const config = loadConfig();
 const recorder = new Recorder(config);
+
+// When an outbound kernel (xray/sing-box) is configured, wait for it to come up
+// so the banner reflects a working tunnel and we fail fast on misconfig.
+if (config.outbound && config.outbound.kernel) {
+  try {
+    await config.outbound.whenReady;
+  } catch (err) {
+    console.error(`[kernel] failed to start outbound kernel: ${err.message}`);
+    process.exit(1);
+  }
+  const stopKernel = () => { try { config.outbound.stop(); } catch { /* ignore */ } };
+  process.on('exit', stopKernel);
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => { stopKernel(); process.exit(0); });
+  }
+}
+
 startProxy(config, recorder);
 startUi(config, recorder);
 

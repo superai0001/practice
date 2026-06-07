@@ -1,0 +1,9 @@
+target
+logs
+logs-*
+.tmp-logs*
+vendor
+*.log
+.git
+Dockerfile
+docker-compose.yml

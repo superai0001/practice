@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/run.js && node test/resilience.js && node test/extensions.js"
+    "test": "node test/run.js && node test/resilience.js && node test/extensions.js && node test/kernel.js"
   },
   "engines": {
     "node": ">=18"

@@ -3,6 +3,8 @@
 // Env vars (all optional):
 //   PROXY_PORT       proxy listen port            (default 8788)
 //   UI_PORT          web UI listen port           (default 8789)
+//   BIND_ADDR        listen address for proxy+UI  (default 127.0.0.1; use
+//                    0.0.0.0 to expose, e.g. inside Docker)
 //   LOG_DIR          directory for JSONL logs     (default <module>/logs)
 //   REDACT_AUTH      "0" to keep raw auth headers (default redact)
 //   ANTHROPIC_UPSTREAM  override Anthropic upstream (default https://api.anthropic.com)
@@ -147,6 +149,7 @@ export function loadConfig(overrides = {}) {
   return {
     proxyPort: intEnv('PROXY_PORT', 8788),
     uiPort: intEnv('UI_PORT', 8789),
+    bindAddr: process.env.BIND_ADDR || '127.0.0.1',
     logDir: process.env.LOG_DIR || path.resolve(__dirname, '..', 'logs'),
     redactAuth: process.env.REDACT_AUTH !== '0',
     maxBodyBytes: intEnv('MAX_BODY_BYTES', 2_000_000),
@@ -193,10 +196,19 @@ export function loadConfig(overrides = {}) {
     // Request filters/rules (opt-in): mutate outbound headers/body before send.
     filters: loadFilters(),
     // Outbound proxy (opt-in): route upstream connections via an HTTP/SOCKS5
-    // proxy. null when UPSTREAM_PROXY (or HTTPS_PROXY/HTTP_PROXY) is unset.
+    // proxy, OR — for advanced share links (vmess/vless/trojan/ss/hysteria2/
+    // tuic) or a native PROXY_KERNEL_CONFIG — via a local xray/sing-box kernel.
+    // null when nothing is configured.
     outbound: createOutbound(
       process.env.UPSTREAM_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy
       || process.env.HTTP_PROXY || process.env.http_proxy,
+      {
+        kernel: process.env.PROXY_KERNEL || 'auto',
+        configPath: process.env.PROXY_KERNEL_CONFIG || '',
+        xrayBin: process.env.XRAY_BIN || '',
+        singboxBin: process.env.SING_BOX_BIN || '',
+        socksPort: intEnv('PROXY_KERNEL_SOCKS_PORT', 0),
+      },
     ),
     ...overrides,
   };

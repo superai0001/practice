@@ -84,6 +84,18 @@ public class ProxyProperties {
     /** 出站代理 URL（http/https/socks5）。回退读 UPSTREAM_PROXY / HTTPS_PROXY / HTTP_PROXY。 */
     private String upstreamProxy;
 
+    // ---- 内核出站（opt-in；UPSTREAM_PROXY 为高级协议链接时启用）-------------------
+    /** 内核选择：auto | xray | sing-box。回退读环境变量 PROXY_KERNEL。 */
+    private String proxyKernel;
+    /** 内核原生配置文件路径（绕过链接解析）。回退读 PROXY_KERNEL_CONFIG。 */
+    private String proxyKernelConfig;
+    /** xray 二进制路径。回退读环境变量 XRAY_BIN。 */
+    private String xrayBin;
+    /** sing-box 二进制路径。回退读环境变量 SING_BOX_BIN。 */
+    private String singBoxBin;
+    /** 固定本地 SOCKS5 端口（0=自动）。回退读 PROXY_KERNEL_SOCKS_PORT。 */
+    private Integer proxyKernelSocksPort;
+
     public String getAnthropicUpstream() {
         return anthropicUpstream;
     }
@@ -507,6 +519,91 @@ public class ProxyProperties {
             return filters;
         }
         return System.getenv("FILTERS");
+    }
+
+    public String getProxyKernel() {
+        return proxyKernel;
+    }
+
+    public void setProxyKernel(String proxyKernel) {
+        this.proxyKernel = proxyKernel;
+    }
+
+    public String getProxyKernelConfig() {
+        return proxyKernelConfig;
+    }
+
+    public void setProxyKernelConfig(String proxyKernelConfig) {
+        this.proxyKernelConfig = proxyKernelConfig;
+    }
+
+    public String getXrayBin() {
+        return xrayBin;
+    }
+
+    public void setXrayBin(String xrayBin) {
+        this.xrayBin = xrayBin;
+    }
+
+    public String getSingBoxBin() {
+        return singBoxBin;
+    }
+
+    public void setSingBoxBin(String singBoxBin) {
+        this.singBoxBin = singBoxBin;
+    }
+
+    public Integer getProxyKernelSocksPort() {
+        return proxyKernelSocksPort;
+    }
+
+    public void setProxyKernelSocksPort(Integer proxyKernelSocksPort) {
+        this.proxyKernelSocksPort = proxyKernelSocksPort;
+    }
+
+    private static String firstNonEmpty(String configured, String env) {
+        if (configured != null && !configured.isEmpty()) {
+            return configured;
+        }
+        String v = System.getenv(env);
+        return (v != null && !v.isEmpty()) ? v : "";
+    }
+
+    /** 内核选择：配置项优先，否则回退 PROXY_KERNEL，默认 "auto"。 */
+    public String resolveProxyKernel() {
+        String v = firstNonEmpty(proxyKernel, "PROXY_KERNEL");
+        return v.isEmpty() ? "auto" : v;
+    }
+
+    /** 内核原生配置文件路径（配置项优先，否则回退 PROXY_KERNEL_CONFIG）。 */
+    public String resolveProxyKernelConfig() {
+        return firstNonEmpty(proxyKernelConfig, "PROXY_KERNEL_CONFIG");
+    }
+
+    /** xray 二进制路径（配置项优先，否则回退 XRAY_BIN）。 */
+    public String resolveXrayBin() {
+        return firstNonEmpty(xrayBin, "XRAY_BIN");
+    }
+
+    /** sing-box 二进制路径（配置项优先，否则回退 SING_BOX_BIN）。 */
+    public String resolveSingBoxBin() {
+        return firstNonEmpty(singBoxBin, "SING_BOX_BIN");
+    }
+
+    /** 固定本地 SOCKS5 端口（配置项优先，否则回退 PROXY_KERNEL_SOCKS_PORT，默认 0）。 */
+    public int resolveProxyKernelSocksPort() {
+        if (proxyKernelSocksPort != null) {
+            return proxyKernelSocksPort;
+        }
+        String v = System.getenv("PROXY_KERNEL_SOCKS_PORT");
+        if (v != null && !v.isEmpty()) {
+            try {
+                return Integer.parseInt(v.trim());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     /** 出站代理 URL。配置项优先，否则回退 UPSTREAM_PROXY / HTTPS_PROXY / HTTP_PROXY（含小写）。 */

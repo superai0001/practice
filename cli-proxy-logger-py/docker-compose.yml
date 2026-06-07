@@ -1,0 +1,29 @@
+services:
+  cli-proxy-logger:
+    build:
+      context: .
+      # Official xray + sing-box Linux binaries are downloaded and baked into the
+      # image by default (~80MB). To build a slimmer image without them, set:
+      #   args: { WITH_KERNEL: "0" }
+      args:
+        WITH_KERNEL: "1"
+    image: cli-proxy-logger-py
+    container_name: cli-proxy-logger-py
+    restart: unless-stopped
+    ports:
+      - "8788:8788"   # proxy (point your CLI base URL here)
+      - "8789:8789"   # web UI
+    environment:
+      BIND_ADDR: "0.0.0.0"
+      # --- optional: route upstream through a proxy or advanced-protocol kernel ---
+      # The kernel binaries are already bundled at /app/vendor (auto-discovered),
+      # so you only need to point UPSTREAM_PROXY at an advanced-protocol link:
+      # UPSTREAM_PROXY: "socks5://host.docker.internal:1080"
+      # UPSTREAM_PROXY: "ss://<base64(method:password)>@example.com:8388#node"
+      # PROXY_KERNEL: "auto"            # auto | xray | sing-box
+    volumes:
+      - ./logs:/app/logs
+      # Override the bundled kernel with your own LINUX binary (optional):
+      #   put `xray` / `sing-box` in ./vendor on the host, then uncomment both lines:
+      # - ./vendor/xray:/app/vendor/xray:ro
+      # - ./vendor/sing-box:/app/vendor/sing-box:ro

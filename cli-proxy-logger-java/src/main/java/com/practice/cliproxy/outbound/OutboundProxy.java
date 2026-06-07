@@ -1,5 +1,9 @@
 package com.practice.cliproxy.outbound;
 
+import com.practice.cliproxy.kernel.Kernel;
+import com.practice.cliproxy.kernel.ShareLink;
+
+import java.io.IOException;
 import java.net.Authenticator;
 import java.net.InetSocketAddress;
 import java.net.PasswordAuthentication;
@@ -29,6 +33,8 @@ public final class OutboundProxy {
     public final String username;
     public final String password;
     private final Proxy javaProxy;
+    /** 非 null 时表示出站经由一个本地 xray/sing-box 内核子进程（高级协议）。 */
+    private Kernel kernel;
 
     private OutboundProxy(String kind, String host, int port, String username, String password) {
         this.kind = kind;
@@ -87,6 +93,46 @@ public final class OutboundProxy {
         return proxy;
     }
 
+    /** 该链接是否为需要内核的高级协议（vmess/vless/trojan/ss/hysteria2/tuic）。 */
+    public static boolean isKernelScheme(String raw) {
+        return ShareLink.isKernelScheme(raw);
+    }
+
+    /**
+     * 在 {@link #create(String)} 基础上支持高级协议：当 {@code raw} 是高级协议分享链接
+     * （或提供了 {@code kernelOpts.configPath}）时，拉起一个本地 xray/sing-box 内核子进程，
+     * 暴露 loopback SOCKS5，并返回一个指向它的 socks5 出站。普通 http/socks 链接走原逻辑。
+     *
+     * @param raw        UPSTREAM_PROXY（普通代理 URL 或高级协议分享链接）
+     * @param kernelOpts 内核选项（kernel/xrayBin/singboxBin/configPath/socksPort），可为 null
+     */
+    public static OutboundProxy create(String raw, Kernel.Options kernelOpts) {
+        Kernel.Options o = kernelOpts != null ? kernelOpts : new Kernel.Options();
+        boolean useKernel = ShareLink.isKernelScheme(raw)
+                || (o.configPath != null && !o.configPath.isEmpty());
+        if (!useKernel) {
+            return create(raw);
+        }
+        o.link = ShareLink.isKernelScheme(raw) ? raw : null;
+        Kernel kernel = Kernel.create(o);
+        int socksPort;
+        try {
+            socksPort = kernel.start();
+        } catch (IOException e) {
+            throw new RuntimeException("failed to start outbound kernel: " + e.getMessage(), e);
+        }
+        OutboundProxy proxy = new OutboundProxy("socks5", "127.0.0.1", socksPort, "", "");
+        proxy.kernel = kernel;
+        return proxy;
+    }
+
+    /** 停止内核子进程（若有）。普通代理为 no-op。 */
+    public void stop() {
+        if (kernel != null) {
+            kernel.stop();
+        }
+    }
+
     private static String decode(String s) {
         try {
             return java.net.URLDecoder.decode(s, "UTF-8");
@@ -101,6 +147,9 @@ public final class OutboundProxy {
     }
 
     public String describe() {
+        if (kernel != null) {
+            return "kernel " + kernel.describe();
+        }
         return kind + "://" + host + ":" + port + (hasAuth() ? " (auth)" : "");
     }
 

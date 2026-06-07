@@ -296,8 +296,9 @@ export function startProxy(config, recorder) {
   });
   server.breakers = breakers; // exposed for tests / introspection
 
-  server.listen(config.proxyPort, '127.0.0.1', () => {
-    console.log(`[proxy] listening on http://127.0.0.1:${server.address().port}`);
+  const bindAddr = config.bindAddr || '127.0.0.1';
+  server.listen(config.proxyPort, bindAddr, () => {
+    console.log(`[proxy] listening on http://${bindAddr}:${server.address().port}`);
   });
   return server;
 }

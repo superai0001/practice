@@ -15,11 +15,14 @@ tunneled socket to a small ``http.client`` connection subclass (wrapping it in
 TLS first for https upstreams). No third-party packages.
 """
 
+import atexit
 import base64
 import http.client
 import socket
 import ssl
 from urllib.parse import urlparse
+
+from .kernel import create_kernel, is_kernel_scheme
 
 
 def parse_proxy_url(raw):
@@ -140,23 +143,18 @@ def _raw_connect(proxy, host, port, timeout):
     return _http_connect_tunnel(proxy, host, port, timeout)
 
 
-def create_outbound(raw):
-    """Build an outbound helper bound to a proxy URL, or None when unset/invalid.
-
-    The returned object exposes ``connection(scheme, host, port, timeout)`` which
-    yields an ``http.client`` connection whose socket is tunneled through the
-    proxy (and TLS-wrapped for https upstreams)."""
-    proxy = parse_proxy_url(raw)
-    if not proxy:
-        return None
+def _build_helper(proxy, describe, kernel=None):
+    """Wrap a normalized socks5/http proxy dict into the outbound helper object.
+    ``proxy`` may be a callable returning the dict (kernel sets it once ready)."""
+    resolve = proxy if callable(proxy) else (lambda: proxy)
 
     class _TunnelHTTPConnection(http.client.HTTPConnection):
         def connect(self):
-            self.sock = _raw_connect(proxy, self.host, self.port, self.timeout)
+            self.sock = _raw_connect(resolve(), self.host, self.port, self.timeout)
 
     class _TunnelHTTPSConnection(http.client.HTTPSConnection):
         def connect(self):
-            raw_sock = _raw_connect(proxy, self.host, self.port, self.timeout)
+            raw_sock = _raw_connect(resolve(), self.host, self.port, self.timeout)
             ctx = self._context or ssl.create_default_context()
             self.sock = ctx.wrap_socket(raw_sock, server_hostname=self.host)
 
@@ -165,9 +163,50 @@ def create_outbound(raw):
             return _TunnelHTTPSConnection(host, port, timeout=timeout)
         return _TunnelHTTPConnection(host, port, timeout=timeout)
 
-    auth = " (auth)" if proxy["username"] else ""
     return {
-        "proxy": proxy,
-        "describe": f"{proxy['kind']}://{proxy['hostname']}:{proxy['port']}{auth}",
+        "proxy": resolve,
+        "describe": describe,
         "connection": connection,
+        "kernel": kernel,
+        "stop": (kernel.stop if kernel else (lambda: None)),
     }
+
+
+def create_outbound(raw, kernel_opts=None):
+    """Build an outbound helper bound to a proxy URL, or None when unset/invalid.
+
+    The returned object exposes ``connection(scheme, host, port, timeout)`` which
+    yields an ``http.client`` connection whose socket is tunneled through the
+    proxy (and TLS-wrapped for https upstreams).
+
+    ``raw`` may be a plain http/https/socks5 proxy URL (used directly) or an
+    advanced share link (vmess/vless/trojan/ss/hysteria2/tuic) which is routed
+    through a local xray/sing-box kernel. ``kernel_opts`` (dict) may carry
+    ``kernel`` (auto/xray/sing-box), ``configPath``, ``xrayBin``, ``singboxBin``,
+    ``socksPort``."""
+    kernel_opts = kernel_opts or {}
+    use_kernel = is_kernel_scheme(raw) or bool(kernel_opts.get("configPath"))
+
+    # --- direct path (today's behavior, unchanged) -------------------------
+    if not use_kernel:
+        proxy = parse_proxy_url(raw)
+        if not proxy:
+            return None
+        auth = " (auth)" if proxy["username"] else ""
+        return _build_helper(
+            proxy, f"{proxy['kind']}://{proxy['hostname']}:{proxy['port']}{auth}")
+
+    # --- kernel path (advanced protocols via xray/sing-box) ----------------
+    kernel = create_kernel({
+        "link": raw if is_kernel_scheme(raw) else None,
+        "configPath": kernel_opts.get("configPath"),
+        "kernel": kernel_opts.get("kernel"),
+        "xrayBin": kernel_opts.get("xrayBin"),
+        "singboxBin": kernel_opts.get("singboxBin"),
+        "socksPort": kernel_opts.get("socksPort"),
+    })
+    socks_port = kernel.start()
+    atexit.register(kernel.stop)
+    proxy = {"kind": "socks5", "hostname": "127.0.0.1", "port": socks_port,
+             "username": "", "password": ""}
+    return _build_helper(proxy, f"kernel {kernel.describe()}", kernel=kernel)
