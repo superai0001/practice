@@ -322,13 +322,26 @@ CLI ──HTTP──▶ cli-proxy-logger :8788 ──socks5──▶ 127.0.0.1:<
 **前置条件**：本机要有内核二进制。从仓库自行构建（需 Go）：
 
 ```bash
-# xray-core -> 产出 ./xray
+# xray-core -> 产出 ./xray（用较新的 Go，本项目用 Go 1.26 验证过）
 git clone https://github.com/XTLS/Xray-core && (cd Xray-core && go build -o xray ./main)
-# sing-box  -> 产出 ./sing-box
-git clone https://github.com/SagerNet/sing-box && (cd sing-box && go build ./cmd/sing-box)
+
+# sing-box -> 产出 ./sing-box
+# 注意：sing-box 的 badtls 用 //go:linkname 引用 crypto/tls 内部方法，
+#      Go 1.26 改了相关签名导致链接失败；请用 Go 1.24.x 构建，并带上需要的特性 tag。
+git clone https://github.com/SagerNet/sing-box && \
+  (cd sing-box && go build -tags "with_utls,with_quic" ./cmd/sing-box)
 ```
 
-把二进制放进 PATH、或放到本模块同级的 `vendor/` 目录、或用 `XRAY_BIN` / `SING_BOX_BIN` 指定路径。
+> Windows 下产出 `xray.exe` / `sing-box.exe`。`with_quic` 是 Hysteria2/TUIC 必需的；`with_utls` 提供 uTLS 指纹（`fp=chrome` 等）。
+
+把二进制放进 PATH、或放到本模块同级的 `vendor/` 目录、或用 `XRAY_BIN` / `SING_BOX_BIN` 指定路径（推荐绝对路径）：
+
+```bash
+export XRAY_BIN=/abs/path/to/xray            # Windows: set XRAY_BIN=C:\path\xray.exe
+export SING_BOX_BIN=/abs/path/to/sing-box
+```
+
+二进制查找顺序：`XRAY_BIN`/`SING_BOX_BIN` 显式路径 → 同级 `vendor/`（`xray`/`sing-box`，Windows 加 `.exe`）→ 系统 PATH。
 
 **用法 A：直接给分享链接**（最省事）。`UPSTREAM_PROXY` 识别到高级协议链接就自动走内核：
 

@@ -204,7 +204,14 @@ def load_config(**overrides):
         "outbound": create_outbound(
             os.environ.get("UPSTREAM_PROXY") or os.environ.get("HTTPS_PROXY")
             or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY")
-            or os.environ.get("http_proxy")
+            or os.environ.get("http_proxy"),
+            {
+                "kernel": os.environ.get("PROXY_KERNEL") or "auto",
+                "configPath": os.environ.get("PROXY_KERNEL_CONFIG") or "",
+                "xrayBin": os.environ.get("XRAY_BIN") or "",
+                "singboxBin": os.environ.get("SING_BOX_BIN") or "",
+                "socksPort": _int_env("PROXY_KERNEL_SOCKS_PORT", 0),
+            },
         ),
     }
     config.update(overrides)

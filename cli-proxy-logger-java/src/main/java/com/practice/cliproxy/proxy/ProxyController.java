@@ -154,7 +154,19 @@ public class ProxyController {
         if (!outboundResolved) {
             synchronized (this) {
                 if (!outboundResolved) {
-                    outboundCache = OutboundProxy.create(props.resolveUpstreamProxyUrl());
+                    com.practice.cliproxy.kernel.Kernel.Options kopts =
+                            new com.practice.cliproxy.kernel.Kernel.Options();
+                    kopts.kernel = props.resolveProxyKernel();
+                    kopts.configPath = props.resolveProxyKernelConfig();
+                    kopts.xrayBin = props.resolveXrayBin();
+                    kopts.singboxBin = props.resolveSingBoxBin();
+                    kopts.socksPort = props.resolveProxyKernelSocksPort();
+                    OutboundProxy ob = OutboundProxy.create(props.resolveUpstreamProxyUrl(), kopts);
+                    if (ob != null) {
+                        // 进程退出时清理内核子进程（与 Node src/index.js 的退出钩子一致）。
+                        Runtime.getRuntime().addShutdownHook(new Thread(ob::stop));
+                    }
+                    outboundCache = ob;
                     outboundResolved = true;
                 }
             }

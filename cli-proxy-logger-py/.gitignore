@@ -6,3 +6,4 @@ logs-*/
 .tmp-logs/
 .tmp-logs-resilience/
 .venv/
+.tmp-logs-ext/

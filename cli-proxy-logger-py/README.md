@@ -171,7 +171,11 @@ OPENAI_UPSTREAM=https://api.freemodel.dev ANTHROPIC_UPSTREAM=https://cc.freemode
 | `TOOL_NAME_MAP_FILE` | 空 | 工具名映射 JSON 文件路径（优先于 `TOOL_NAME_MAP`） |
 | `FILTERS` | 空 | 请求过滤器/规则 JSON 数组（见下节）；转发上游前改写请求头/请求体 |
 | `FILTERS_FILE` | 空 | 过滤器 JSON 文件路径（优先于 `FILTERS`） |
-| `UPSTREAM_PROXY` | 空 | 出站代理 URL（`http://`/`https://`/`socks5://`，可带 `user:pass@`）；未设时回退 `HTTPS_PROXY`/`HTTP_PROXY` |
+| `UPSTREAM_PROXY` | 空 | 出站代理 URL。普通代理 `http://`/`https://`/`socks5://`（可带 `user:pass@`），未设时回退 `HTTPS_PROXY`/`HTTP_PROXY`。**高级协议**：`vmess://`/`vless://`/`trojan://`/`ss://`/`hysteria2://`(`hy2://`)/`tuic://` 分享链接，自动拉起本地 xray/sing-box 内核出站（见「内核出站」一节） |
+| `PROXY_KERNEL` | `auto` | 内核选择：`auto`/`xray`/`sing-box`。`auto` 优先 xray；`hysteria2`/`tuic` 只能 sing-box，会自动选 |
+| `PROXY_KERNEL_CONFIG` | 空 | 一份完整的原生内核配置 JSON 文件路径（高级用法；自动确保里面有一个回环 socks inbound 并路由过去）。设了它即启用内核 |
+| `XRAY_BIN` / `SING_BOX_BIN` | 空 | 内核二进制路径；不设则按 PATH 与同级 `vendor/` 目录查找 |
+| `PROXY_KERNEL_SOCKS_PORT` | 随机 | 内核本地 socks inbound 端口（默认取空闲端口） |
 
 ## 弹性：多供应商故障转移 + 熔断 + thinking 整流（全部 opt-in）
 
@@ -312,6 +316,62 @@ UPSTREAM_PROXY=socks5://127.0.0.1:1080 python -m cli_proxy_logger
 # 或带鉴权的 HTTP 代理：
 UPSTREAM_PROXY=http://user:pass@proxy.example.com:3128 python -m cli_proxy_logger
 ```
+
+#### 内核出站：用 xray-core / sing-box 支持更多协议
+
+`http`/`socks5` 之外，出站代理还能走 **VMess / VLESS / Trojan / Shadowsocks / Hysteria2 / TUIC** 等协议——做法是把官方内核（[xray-core](https://github.com/XTLS/Xray-core) 或 [sing-box](https://github.com/SagerNet/sing-box)）作为本地子进程拉起：内核 inbound 是一个**仅回环的 SOCKS5**，outbound 是你的高级协议；代理现有的 socks 隧道直接指向这个本地端口。Python 侧仍是纯标准库、隧道逻辑零改动。与 Node 版逻辑 1:1 对齐（`cli_proxy_logger/kernel/`）。
+
+```
+CLI ──HTTP──▶ cli-proxy-logger :8788 ──socks5──▶ 127.0.0.1:<随机端口>
+                                                  (xray / sing-box)
+                                                       │ VMess/VLESS/Trojan/SS/Hy2/TUIC
+                                                       ▼  真实上游
+```
+
+**前置条件**：本机要有内核二进制。从仓库自行构建（需 Go）：
+
+```bash
+# xray-core -> 产出 ./xray（用较新的 Go，本项目用 Go 1.26 验证过）
+git clone https://github.com/XTLS/Xray-core && (cd Xray-core && go build -o xray ./main)
+
+# sing-box -> 产出 ./sing-box
+# 注意：sing-box 的 badtls 用 //go:linkname 引用 crypto/tls 内部方法，
+#      Go 1.26 改了相关签名导致链接失败；请用 Go 1.24.x 构建，并带上需要的特性 tag。
+git clone https://github.com/SagerNet/sing-box && \
+  (cd sing-box && go build -tags "with_utls,with_quic" ./cmd/sing-box)
+```
+
+把二进制放进 PATH、或放到本模块同级的 `vendor/` 目录、或用 `XRAY_BIN` / `SING_BOX_BIN` 指定绝对路径。查找顺序：显式路径 → `vendor/` → PATH。
+
+**用法 A：直接给分享链接**（最省事）。`UPSTREAM_PROXY` 识别到高级协议链接就自动走内核：
+
+```bash
+# VLESS + Reality（自动选 xray）
+UPSTREAM_PROXY='vless://<uuid>@example.com:443?encryption=none&security=reality&pbk=<pubkey>&sid=<shortid>&sni=www.apple.com&fp=chrome&type=tcp#node' python -m cli_proxy_logger
+# Shadowsocks（aes-128-gcm 等）
+UPSTREAM_PROXY='ss://<base64(method:password)>@example.com:8388#node' python -m cli_proxy_logger
+# Hysteria2 / TUIC（只能 sing-box，auto 会自动选）
+UPSTREAM_PROXY='hysteria2://<pass>@example.com:8443?sni=example.com#node' python -m cli_proxy_logger
+```
+
+`PROXY_KERNEL=auto`（默认）优先用 xray；`hysteria2`/`tuic` xray 不支持，会自动改用 sing-box。也可显式 `PROXY_KERNEL=xray` 或 `PROXY_KERNEL=sing-box`。
+
+**用法 B：给一份完整原生配置**（高级，协议/参数随便配）。设 `PROXY_KERNEL_CONFIG` 指向 xray 或 sing-box 的原生 JSON；代理会自动确保里面有一个回环 socks inbound 再路由过去：
+
+```bash
+PROXY_KERNEL=sing-box PROXY_KERNEL_CONFIG=./my-singbox.json python -m cli_proxy_logger
+```
+
+**内核相关环境变量**
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `PROXY_KERNEL` | `auto` | 内核选择：`auto`/`xray`/`sing-box`。`auto` 优先 xray；`hysteria2`/`tuic` 只能 sing-box，会自动选 |
+| `PROXY_KERNEL_CONFIG` | 空 | 一份完整的原生内核配置 JSON 文件路径（高级用法；自动确保里面有一个回环 socks inbound 并路由过去）。设了它即启用内核（无需 `UPSTREAM_PROXY` 是链接） |
+| `XRAY_BIN` / `SING_BOX_BIN` | 空 | 内核二进制路径；不设则按 PATH 与同级 `vendor/` 目录查找 |
+| `PROXY_KERNEL_SOCKS_PORT` | 随机 | 内核本地 socks inbound 端口（默认取空闲端口） |
+
+> 链接里的常用参数都支持：TLS（`security=tls`，`sni`/`alpn`/`fp`/`allowInsecure`）、Reality（`security=reality`，`pbk`/`sid`/`spx`）、传输层（`type=ws|grpc|http|httpupgrade`，`path`/`host`/`serviceName`）。内核子进程随主进程退出（`atexit`）一并关闭，临时配置文件自动清理。
 
 > Web UI 顶部有「config」按钮，只读展示当前生效的工具名映射规模、过滤器列表、出站代理（脱敏）、翻译/弹性开关，便于核对配置是否按预期加载。
 
