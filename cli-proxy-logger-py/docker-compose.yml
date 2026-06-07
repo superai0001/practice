@@ -1,6 +1,12 @@
 services:
   cli-proxy-logger:
-    build: .
+    build:
+      context: .
+      # Official xray + sing-box Linux binaries are downloaded and baked into the
+      # image by default (~80MB). To build a slimmer image without them, set:
+      #   args: { WITH_KERNEL: "0" }
+      args:
+        WITH_KERNEL: "1"
     image: cli-proxy-logger-py
     container_name: cli-proxy-logger-py
     restart: unless-stopped
@@ -10,20 +16,14 @@ services:
     environment:
       BIND_ADDR: "0.0.0.0"
       # --- optional: route upstream through a proxy or advanced-protocol kernel ---
+      # The kernel binaries are already bundled at /app/vendor (auto-discovered),
+      # so you only need to point UPSTREAM_PROXY at an advanced-protocol link:
       # UPSTREAM_PROXY: "socks5://host.docker.internal:1080"
       # UPSTREAM_PROXY: "ss://<base64(method:password)>@example.com:8388#node"
       # PROXY_KERNEL: "auto"            # auto | xray | sing-box
-      # XRAY_BIN: "/vendor/xray"        # LINUX binaries (see ./vendor note below)
-      # SING_BOX_BIN: "/vendor/sing-box"
     volumes:
       - ./logs:/app/logs
-      # Kernel binaries must be LINUX builds (the container is Linux). Put
-      # `xray` / `sing-box` in ./vendor on the host, then uncomment:
-      # - ./vendor:/vendor:ro
-
-# Build Linux kernel binaries into ./vendor without installing Go locally:
-#   docker run --rm -v "$PWD/vendor:/out" golang:1.26 sh -c \
-#     "git clone https://github.com/XTLS/Xray-core /x && cd /x && go build -o /out/xray ./main"
-#   docker run --rm -v "$PWD/vendor:/out" golang:1.24 sh -c \
-#     "git clone https://github.com/SagerNet/sing-box /s && cd /s && \
-#      go build -tags 'with_utls,with_quic' -o /out/sing-box ./cmd/sing-box"
+      # Override the bundled kernel with your own LINUX binary (optional):
+      #   put `xray` / `sing-box` in ./vendor on the host, then uncomment both lines:
+      # - ./vendor/xray:/app/vendor/xray:ro
+      # - ./vendor/sing-box:/app/vendor/sing-box:ro

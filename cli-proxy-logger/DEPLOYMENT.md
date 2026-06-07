@@ -94,7 +94,7 @@ powershell -ExecutionPolicy Bypass -File deploy\install-nssm.ps1
 
 ### E. Docker / docker-compose
 
-仓库内置 `Dockerfile`（`node:20-slim`）+ `docker-compose.yml`。镜像内已默认 `BIND_ADDR=0.0.0.0`。
+仓库内置 `Dockerfile`（`node:20-slim`）+ `docker-compose.yml`。镜像内已默认 `BIND_ADDR=0.0.0.0`。**镜像构建时会自动下载官方 xray + sing-box 的 Linux 二进制打进 `/app/vendor`（约 80MB），所以容器开箱即可走高级协议，无需自己准备内核**。
 
 ```bash
 cd cli-proxy-logger
@@ -104,6 +104,8 @@ docker compose logs -f
 docker compose down
 ```
 
+不想把内核打进镜像（镜像更小）：`docker compose build --build-arg WITH_KERNEL=0`，或在 compose 的 `build.args` 里设 `WITH_KERNEL: "0"`。
+
 不用 compose：
 
 ```bash
@@ -112,7 +114,7 @@ docker run -d --name cli-proxy-logger -p 8788:8788 -p 8789:8789 \
   -e BIND_ADDR=0.0.0.0 -v "$PWD/logs:/app/logs" cli-proxy-logger-node
 ```
 
-**容器内走内核**：内核二进制必须是 **Linux 版**（容器是 Linux）。把 Linux 版 `xray`/`sing-box` 放进 `./vendor`，在 `docker-compose.yml` 里取消注释 `./vendor:/vendor:ro` 卷与 `XRAY_BIN`/`SING_BOX_BIN`/`PROXY_KERNEL`。不装 Go 也能用一次性 Go 容器交叉编译（命令见 compose 文件末尾注释）。
+**容器内走内核**：默认已把官方内核打进镜像（见上），你只需把 `UPSTREAM_PROXY` 指向高级协议分享链接（compose 里有注释示例）。若要用**你自己的** Linux 版二进制覆盖内置的，把它放到宿主机 `./vendor/`，在 `docker-compose.yml` 里取消注释 `./vendor/xray:/app/vendor/xray:ro` 等挂载行即可。
 
 ### F. 单文件 exe（说明）
 
@@ -121,15 +123,33 @@ docker run -d --name cli-proxy-logger -p 8788:8788 -p 8789:8789 \
 - **Docker 镜像**（见 E，跨平台、最省心）；或
 - **目录压缩包**（见 B 的 `scripts/package.*`，目标机只需装 Node 20）。
 
-若确实要一个**免装运行时的单文件 .exe**，最干净的是用 **Python 变体的 PyInstaller** 路径（见 `cli-proxy-logger-py/DEPLOYMENT.md`，三套功能等价）。
+若确实要一个**免装运行时的单文件 .exe**，最干净的是改用 **Python 变体的 PyInstaller** 路径（三套功能等价，Python 版纯标准库可直接 `--onefile` 打成 exe）。
 
 ---
 
-## 3. 内核出站（xray / sing-box）的构建与启用
+## 3. 内核出站（xray / sing-box）的获取与启用
 
-让代理支持 VMess/VLESS/Trojan/Shadowsocks/Hysteria2/TUIC 等高级协议：内核作为本地 SOCKS5 前置层由本服务自动拉起，**你只需服务起一个**，外加内核二进制能被找到。
+让代理支持 VMess/VLESS/Trojan/Shadowsocks/Hysteria2/TUIC 等高级协议：内核作为本地 SOCKS5 前置层由本服务自动拉起，**你只需服务起一个**，外加内核二进制能被找到。**注意：内核一般无需自己编译——直接下载官方预编译二进制即可（见下 A/B）**。
 
-### 3.1 构建内核二进制
+二进制查找顺序：显式路径（`XRAY_BIN`/`SING_BOX_BIN`）→ 同级 `vendor/`（`xray`/`sing-box`，Windows 带 `.exe`）→ 系统 PATH。下面三种获取方式任选其一（**绝大多数情况选 A，不用装 Go、不用编译**）。
+
+#### A. 一键下载官方预编译二进制（推荐，已实测）
+
+仓库自带 `scripts/fetch-kernel.*`：按当前 OS/arch 从 GitHub 官方 Releases 拉 xray + sing-box 到 `./vendor/`，应用会自动发现。
+
+```bash
+bash scripts/fetch-kernel.sh                                       # Linux/macOS，两个内核都拉
+powershell -ExecutionPolicy Bypass -File scripts\fetch-kernel.ps1  # Windows
+# 只要一个： fetch-kernel.sh xray  或  fetch-kernel.sh sing-box
+```
+
+#### B. 手动下载官方 Release
+
+到官方 Releases 下对应平台的压缩包，解压把 `xray`/`sing-box`（Windows 带 `.exe`）丢进 `./vendor/` 或用 `XRAY_BIN`/`SING_BOX_BIN` 指向：
+- xray：<https://github.com/XTLS/Xray-core/releases>
+- sing-box：<https://github.com/SagerNet/sing-box/releases>
+
+#### C. 从源码自行构建（仅在需要特定版本/特性时）
 
 ```bash
 # xray-core（用较新的 Go；本项目用 Go 1.26 验过）
@@ -142,8 +162,6 @@ go build -tags "with_utls,with_quic" -o sing-box ./cmd/sing-box
 ```
 
 > **坑**：sing-box 的 `badtls` 用 `//go:linkname` 引用 `crypto/tls` 内部方法，**Go 1.26 改了相关签名导致链接失败**，必须用 **Go 1.24.x** 且带 `with_utls,with_quic` tag。xray 用 Go 1.26 正常。
-
-二进制查找顺序：显式路径（`XRAY_BIN`/`SING_BOX_BIN`）→ 同级 `vendor/`（`xray`/`sing-box`，Windows 带 `.exe`）→ 系统 PATH。
 
 ### 3.2 启用（两种用法）
 

@@ -320,7 +320,15 @@ CLI ──HTTP──▶ cli-proxy-logger :8788 ──socks5──▶ 127.0.0.1:<
                                                        ▼  真实上游
 ```
 
-**前置条件**：本机要有内核二进制。从仓库自行构建（需 Go）：
+**前置条件**：本机要有内核二进制。**最省事：一键下载官方预编译二进制**（无需装 Go）：
+
+```bash
+bash scripts/fetch-kernel.sh                                       # Linux/macOS
+powershell -ExecutionPolicy Bypass -File scripts\fetch-kernel.ps1  # Windows
+# 拉官方 Releases 的 xray + sing-box 到 ./vendor/（应用自动发现）；只要一个：fetch-kernel.sh xray
+```
+
+也可手动到 [xray](https://github.com/XTLS/Xray-core/releases) / [sing-box](https://github.com/SagerNet/sing-box/releases) Releases 下载，或从源码自行构建（仅在需要特定版本/特性时，需 Go）：
 
 ```bash
 # xray-core -> 产出 ./xray（用较新的 Go，本项目用 Go 1.26 验证过）
